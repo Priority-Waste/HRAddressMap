@@ -1,0 +1,864 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Address Heat Mapper</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+  header {
+    background: linear-gradient(135deg, #1f3a5f 0%, #2d5586 100%);
+    color: white; padding: 12px 20px; display: flex; align-items: center; justify-content: space-between;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 500;
+  }
+  header h1 { margin: 0; font-size: 1.25rem; font-weight: 600; }
+  header .subtitle { font-size: 0.8rem; opacity: 0.85; margin-top: 2px; }
+  .layout { display: flex; flex: 1; overflow: hidden; }
+  aside {
+    width: 360px; background: #f7f8fa; border-right: 1px solid #e3e6ea;
+    overflow-y: auto; padding: 16px; flex-shrink: 0;
+  }
+  aside h2 { font-size: 0.95rem; margin: 0 0 8px; color: #1f3a5f; text-transform: uppercase; letter-spacing: 0.5px; }
+  .section { background: white; border: 1px solid #e3e6ea; border-radius: 8px; padding: 12px; margin-bottom: 14px; }
+  .group-row {
+    display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px;
+    margin-bottom: 4px; transition: background 0.15s;
+  }
+  .group-row:hover { background: #f0f3f7; }
+  .group-row .swatch {
+    width: 22px; height: 22px; border-radius: 50%; border: 2px solid white;
+    box-shadow: 0 0 0 1px #999, 0 1px 3px rgba(0,0,0,0.2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; color: white; font-weight: bold; flex-shrink: 0;
+  }
+  .group-row label { flex: 1; font-size: 0.85rem; cursor: pointer; }
+  .group-row .count { font-size: 0.75rem; color: #6b7280; background: #eef1f5; padding: 2px 8px; border-radius: 10px; }
+  .group-row .actions { display: flex; gap: 4px; }
+  .group-row button {
+    background: none; border: none; cursor: pointer; padding: 2px 4px;
+    color: #6b7280; font-size: 0.85rem; border-radius: 4px;
+  }
+  .group-row button:hover { background: #e3e6ea; color: #1f3a5f; }
+  input[type="text"], input[type="file"], textarea, select {
+    width: 100%; padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 6px;
+    font-size: 0.85rem; font-family: inherit; margin-bottom: 8px;
+  }
+  textarea { resize: vertical; min-height: 70px; }
+  button.primary {
+    background: #1f3a5f; color: white; border: none; padding: 8px 14px;
+    border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 500;
+    width: 100%; transition: background 0.15s;
+  }
+  button.primary:hover { background: #2d5586; }
+  button.primary:disabled { background: #9ca3af; cursor: not-allowed; }
+  button.secondary {
+    background: white; color: #1f3a5f; border: 1px solid #1f3a5f; padding: 6px 12px;
+    border-radius: 6px; cursor: pointer; font-size: 0.8rem;
+  }
+  button.secondary:hover { background: #eaeef3; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  .symbol-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 4px; }
+  .symbol-grid button {
+    background: white; border: 1px solid #d1d5db; border-radius: 6px;
+    padding: 6px; cursor: pointer; font-size: 16px; line-height: 1;
+  }
+  .symbol-grid button.active { border: 2px solid #1f3a5f; background: #eaeef3; }
+  .color-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin-top: 4px; }
+  .color-grid button {
+    width: 100%; aspect-ratio: 1; border-radius: 50%; border: 2px solid white;
+    box-shadow: 0 0 0 1px #999; cursor: pointer;
+  }
+  .color-grid button.active { box-shadow: 0 0 0 2px #1f3a5f; transform: scale(1.1); }
+  #map { flex: 1; height: 100%; background: #e3e6ea; }
+  .status {
+    position: absolute; bottom: 12px; left: 380px; background: white; padding: 8px 14px;
+    border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); font-size: 0.85rem;
+    z-index: 600; max-width: 60%;
+  }
+  .status.error { background: #fee2e2; color: #991b1b; }
+  .status.success { background: #d1fae5; color: #065f46; }
+  .progress {
+    width: 100%; height: 4px; background: #e3e6ea; border-radius: 2px; margin-top: 6px; overflow: hidden;
+  }
+  .progress-bar { height: 100%; background: #1f3a5f; transition: width 0.2s; }
+  details { margin-bottom: 8px; }
+  details summary { cursor: pointer; font-size: 0.85rem; color: #1f3a5f; padding: 4px 0; font-weight: 500; }
+  .help { font-size: 0.75rem; color: #6b7280; margin: 4px 0 8px; line-height: 1.4; }
+  .leaflet-popup-content { font-size: 0.85rem; line-height: 1.4; }
+  .leaflet-popup-content strong { color: #1f3a5f; }
+  .custom-marker {
+    width: 28px; height: 28px; border-radius: 50%; border: 2px solid white;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4); display: flex; align-items: center;
+    justify-content: center; font-size: 14px; color: white; font-weight: bold;
+  }
+  .toggle-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 0.85rem; }
+  .toggle-row input[type="checkbox"] { margin: 0; }
+  hr { border: none; border-top: 1px solid #e3e6ea; margin: 12px 0; }
+  .pill {
+    display: inline-block; background: #eaeef3; color: #1f3a5f; padding: 2px 8px;
+    border-radius: 10px; font-size: 0.75rem; font-weight: 500;
+  }
+  .failed-row { display: flex; gap: 6px; margin-bottom: 6px; }
+  .failed-row input { flex: 1; margin-bottom: 0; font-size: 0.78rem; }
+  .failed-row button { padding: 4px 8px; }
+  @media (max-width: 768px) {
+    .layout { flex-direction: column; }
+    aside { width: 100%; height: 50%; border-right: none; border-bottom: 1px solid #e3e6ea; }
+    .status { left: 12px; max-width: calc(100% - 24px); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Address Heat Mapper</h1>
+    <div class="subtitle">Upload a spreadsheet or paste addresses to plot them on the map</div>
+  </div>
+  <div>
+    <span class="pill" id="totalCount">0 mapped</span>
+  </div>
+</header>
+
+<div class="layout">
+  <aside>
+    <div class="section">
+      <h2>Groups</h2>
+      <div class="help">Each group has its own symbol & color. Click a row to make it active.</div>
+      <div id="groupList"></div>
+      <button class="secondary" id="addGroupBtn" style="width:100%; margin-top:6px;">+ New Group</button>
+    </div>
+
+    <div class="section">
+      <h2>Active Group: <span id="activeGroupName" style="color:#1f3a5f">&mdash;</span></h2>
+
+      <details open>
+        <summary>Upload Spreadsheet</summary>
+        <div class="help">Accepts .xlsx, .xls, .csv. Address columns are detected automatically.</div>
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" />
+        <div id="columnMap" style="display:none">
+          <div class="row"><select id="addrCol"></select></div>
+          <div class="row"><select id="cityCol"></select><select id="stateCol"></select></div>
+          <button class="primary" id="importBtn">Import & Geocode</button>
+        </div>
+      </details>
+
+      <details open>
+        <summary>Add Addresses Manually</summary>
+        <div class="help">
+          One address per line, e.g. <em>123 Main St, Detroit, MI</em>.<br/>
+          To bypass geocoding, append exact coordinates: <em>123 Main St @ 42.331, -83.046</em>
+        </div>
+        <textarea id="manualInput" placeholder="45000 River Ridge Drive, Clinton Township, MI 48038&#10;39000 Van Born Rd, Wayne, MI 48184&#10;Bay Harbor Resort @ 45.380, -85.038"></textarea>
+        <button class="primary" id="addManualBtn">Add to Map</button>
+      </details>
+
+      <details>
+        <summary>Symbol & Color</summary>
+        <div class="help">Pick how this group looks on the map.</div>
+        <div class="symbol-grid" id="symbolGrid"></div>
+        <div class="color-grid" id="colorGrid" style="margin-top:10px"></div>
+      </details>
+    </div>
+
+    <div class="section" id="failedSection" style="display:none">
+      <h2>Could Not Locate</h2>
+      <div class="help">These addresses failed to geocode. Edit and retry, or remove.</div>
+      <div id="failedList"></div>
+    </div>
+
+    <div class="section" id="mappedSection" style="display:none">
+      <h2>Mapped Addresses (Active Group)</h2>
+      <div class="help">Click an address to zoom to its marker. Edit or remove individually.</div>
+      <div id="mappedList"></div>
+    </div>
+
+    <div class="section">
+      <h2>Display</h2>
+      <div class="toggle-row"><input type="checkbox" id="clusterToggle" /><label for="clusterToggle">Cluster nearby markers</label></div>
+      <div class="toggle-row"><input type="checkbox" id="heatToggle" /><label for="heatToggle">Show heat layer</label></div>
+      <div class="toggle-row"><input type="checkbox" id="labelToggle" /><label for="labelToggle">Show address labels</label></div>
+      <hr/>
+      <button class="secondary" id="fitBtn" style="width:100%; margin-bottom:6px;">Zoom to Fit All</button>
+      <button class="secondary" id="exportBtn" style="width:100%;">Export Coordinates (CSV)</button>
+    </div>
+  </aside>
+
+  <div id="map"></div>
+</div>
+
+<div class="status" id="status" style="display:none"></div>
+
+<script>
+/* Address Heat Mapper
+   Geocoding cascade:  US Census Geocoder -> Nominatim structured -> Nominatim free-form (Michigan-bounded)
+*/
+
+const SYMBOLS = ["●","★","■","▲","◆","♥","✚","⚑","⬢","✦","☀","☂","✈","⚓","⚙","♣"];
+const COLORS  = [
+  "#e11d48","#f97316","#eab308","#22c55e","#06b6d4","#3b82f6","#8b5cf6","#ec4899",
+  "#0ea5e9","#10b981","#facc15","#a855f7","#ef4444","#14b8a6","#f59e0b","#6366f1"
+];
+
+const geocodeCache = {};
+const DEFAULT_STATE = "Michigan";
+const DEFAULT_COUNTRY = "USA";
+const MI_VIEWBOX = "-90.5,48.5,-82.0,41.6"; // lon_min, lat_max, lon_max, lat_min
+
+let map, baseLayer;
+const groups = {};
+let activeGroupId = null;
+let groupCounter = 0;
+const failedAddresses = [];
+
+// Pre-loaded HQ — known coordinates so it always plots even if geocoding fails
+// Format: { address, lat, lon }   (lat/lon optional — if missing, will be geocoded)
+const PRELOADED_REFERENCES = [
+  // Priority Waste HQ — coordinates pinned to the building footprint
+  { address: "45000 River Ridge Drive, Clinton Township, MI 48038", lat: 42.6296, lon: -82.8855 }
+];
+const PRELOADED_CUSTOMERS = [];
+
+// Hard-coded known coordinates — checked before any geocoder.
+// Useful for commercial addresses on private roads that Census/Nominatim miss.
+const KNOWN_COORDS = {
+  "45000 RIVER RIDGE DRIVE, CLINTON TOWNSHIP, MI": { lat: 42.6296, lon: -82.8855 },
+  "45000 RIVER RIDGE DR, CLINTON TOWNSHIP, MI":   { lat: 42.6296, lon: -82.8855 },
+  "39000 VAN BORN RD, WAYNE, MI":                  { lat: 42.2786, lon: -83.3520 }
+};
+
+// ---------- Map ----------
+function initMap() {
+  map = L.map("map", { preferCanvas: true }).setView([42.55, -82.95], 9);
+  baseLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+}
+
+function setStatus(message, type, progress) {
+  const el = document.getElementById("status");
+  if (!message) { el.style.display = "none"; return; }
+  el.style.display = "block";
+  el.className = "status " + (type || "");
+  let html = message;
+  if (progress != null) html += '<div class="progress"><div class="progress-bar" style="width:' + progress + '%"></div></div>';
+  el.innerHTML = html;
+}
+
+// ---------- Groups ----------
+function createGroup(name, symbol, color) {
+  const id = "g" + (++groupCounter);
+  const layer = L.layerGroup(); // individual markers, no clustering by default
+  groups[id] = { id: id, name: name, symbol: symbol, color: color, points: [], layer: layer, heatLayer: null, visible: true, cluster: false };
+  layer.addTo(map);
+  renderGroupList();
+  return id;
+}
+
+function renderGroupList() {
+  const list = document.getElementById("groupList");
+  list.innerHTML = "";
+  Object.values(groups).forEach(g => {
+    const row = document.createElement("div");
+    row.className = "group-row";
+    row.style.background = g.id === activeGroupId ? "#eaeef3" : "";
+    row.innerHTML =
+      '<div class="swatch" style="background:' + g.color + '">' + g.symbol + '</div>' +
+      '<label>' + g.name + '</label>' +
+      '<span class="count">' + g.points.length + '</span>' +
+      '<div class="actions">' +
+        '<button title="Toggle visibility">' + (g.visible ? "\u{1F441}" : "—") + '</button>' +
+        '<button title="Rename">✎</button>' +
+        '<button title="Delete">×</button>' +
+      '</div>';
+    const buttons = row.querySelectorAll("button");
+    row.querySelector("label").onclick = () => setActiveGroup(g.id);
+    row.querySelector(".swatch").onclick = () => setActiveGroup(g.id);
+    buttons[0].onclick = (e) => { e.stopPropagation(); toggleVisibility(g.id); };
+    buttons[1].onclick = (e) => { e.stopPropagation(); renameGroup(g.id); };
+    buttons[2].onclick = (e) => { e.stopPropagation(); deleteGroup(g.id); };
+    list.appendChild(row);
+  });
+  document.getElementById("activeGroupName").textContent = activeGroupId ? groups[activeGroupId].name : "—";
+  updateTotalCount();
+  renderSymbolColorGrids();
+  renderMappedList();
+}
+
+function setActiveGroup(id) { activeGroupId = id; renderGroupList(); }
+
+function toggleVisibility(id) {
+  const g = groups[id];
+  g.visible = !g.visible;
+  if (g.visible) { g.layer.addTo(map); if (g.heatLayer) g.heatLayer.addTo(map); }
+  else { map.removeLayer(g.layer); if (g.heatLayer) map.removeLayer(g.heatLayer); }
+  renderGroupList();
+}
+
+function renameGroup(id) {
+  const newName = prompt("Group name:", groups[id].name);
+  if (newName) { groups[id].name = newName; renderGroupList(); }
+}
+
+function deleteGroup(id) {
+  if (!confirm('Delete group "' + groups[id].name + '"?')) return;
+  map.removeLayer(groups[id].layer);
+  if (groups[id].heatLayer) map.removeLayer(groups[id].heatLayer);
+  delete groups[id];
+  if (activeGroupId === id) activeGroupId = Object.keys(groups)[0] || null;
+  renderGroupList();
+}
+
+function updateTotalCount() {
+  const total = Object.values(groups).reduce((s, g) => s + g.points.length, 0);
+  document.getElementById("totalCount").textContent = total + " mapped";
+}
+
+// ---------- Symbol & color pickers ----------
+function renderSymbolColorGrids() {
+  const sg = document.getElementById("symbolGrid");
+  const cg = document.getElementById("colorGrid");
+  sg.innerHTML = ""; cg.innerHTML = "";
+  if (!activeGroupId) return;
+  const g = groups[activeGroupId];
+  SYMBOLS.forEach(s => {
+    const b = document.createElement("button");
+    b.textContent = s;
+    if (s === g.symbol) b.classList.add("active");
+    b.onclick = () => { g.symbol = s; refreshGroupMarkers(g.id); renderGroupList(); };
+    sg.appendChild(b);
+  });
+  COLORS.forEach(c => {
+    const b = document.createElement("button");
+    b.style.background = c;
+    if (c === g.color) b.classList.add("active");
+    b.onclick = () => { g.color = c; refreshGroupMarkers(g.id); renderGroupList(); };
+    cg.appendChild(b);
+  });
+}
+
+function makeIcon(symbol, color) {
+  return L.divIcon({
+    className: "",
+    html: '<div class="custom-marker" style="background:' + color + '">' + symbol + '</div>',
+    iconSize: [28, 28], iconAnchor: [14, 14], popupAnchor: [0, -14]
+  });
+}
+
+function refreshGroupMarkers(id) {
+  const g = groups[id];
+  g.layer.clearLayers();
+  const icon = makeIcon(g.symbol, g.color);
+  g.points.forEach((p, idx) => {
+    const m = L.marker([p.lat, p.lon], { icon: icon, draggable: true, autoPan: true });
+    p.marker = m;
+    // Sync coordinates if the user drags the marker
+    m.on("dragend", (ev) => {
+      const ll = ev.target.getLatLng();
+      p.lat = ll.lat; p.lon = ll.lng;
+    });
+    const safeAddr = p.address.replace(/</g, "&lt;");
+    m.bindPopup(
+      '<div style="min-width:220px">' +
+        '<strong>' + g.name + '</strong><br>' + safeAddr +
+        '<div style="font-size:11px; color:#6b7280; margin-top:4px;">' +
+          p.lat.toFixed(5) + ", " + p.lon.toFixed(5) + ' · drag pin to adjust' +
+        '</div>' +
+        '<div style="margin-top:8px; display:flex; gap:6px;">' +
+          '<button class="popup-edit" data-gid="' + g.id + '" data-idx="' + idx + '" ' +
+            'style="flex:1; padding:4px 8px; background:white; color:#1f3a5f; border:1px solid #1f3a5f; border-radius:4px; cursor:pointer; font-size:12px;">Edit</button>' +
+          '<button class="popup-remove" data-gid="' + g.id + '" data-idx="' + idx + '" ' +
+            'style="flex:1; padding:4px 8px; background:#fee2e2; color:#991b1b; border:1px solid #991b1b; border-radius:4px; cursor:pointer; font-size:12px;">Remove</button>' +
+        '</div>' +
+      '</div>'
+    );
+    if (document.getElementById("labelToggle").checked) {
+      m.bindTooltip(p.address, { permanent: true, direction: "top", offset: [0, -14] });
+    }
+    g.layer.addLayer(m);
+  });
+  refreshHeatLayer(id);
+  renderMappedList();
+}
+
+// Delegate clicks for popup buttons (popups are rendered into the DOM each open)
+document.addEventListener("click", async (e) => {
+  if (e.target.classList.contains("popup-edit")) {
+    const gid = e.target.dataset.gid;
+    const idx = parseInt(e.target.dataset.idx, 10);
+    await editPoint(gid, idx);
+  } else if (e.target.classList.contains("popup-remove")) {
+    const gid = e.target.dataset.gid;
+    const idx = parseInt(e.target.dataset.idx, 10);
+    removePoint(gid, idx);
+  }
+});
+
+async function editPoint(groupId, idx) {
+  const g = groups[groupId]; if (!g) return;
+  const p = g.points[idx]; if (!p) return;
+  const newAddr = prompt("Edit address:", p.address);
+  if (newAddr == null) return;
+  const trimmed = newAddr.trim();
+  if (!trimmed) return;
+  if (trimmed === p.address) return;
+  setStatus("Re-geocoding…", "");
+  delete geocodeCache[trimmed];
+  const result = await geocode(trimmed);
+  if (result) {
+    p.address = trimmed;
+    p.lat = result.lat;
+    p.lon = result.lon;
+    map.closePopup();
+    refreshGroupMarkers(groupId);
+    renderGroupList();
+    setStatus("Updated ✓", "success");
+    setTimeout(() => setStatus(""), 3000);
+  } else {
+    setStatus('Could not locate "' + trimmed + '". Address kept unchanged.', "error");
+    setTimeout(() => setStatus(""), 6000);
+  }
+}
+
+function removePoint(groupId, idx) {
+  const g = groups[groupId]; if (!g) return;
+  if (!confirm('Remove "' + g.points[idx].address + '" from the map?')) return;
+  g.points.splice(idx, 1);
+  map.closePopup();
+  refreshGroupMarkers(groupId);
+  renderGroupList();
+}
+
+function renderMappedList() {
+  const section = document.getElementById("mappedSection");
+  const list = document.getElementById("mappedList");
+  if (!activeGroupId || !groups[activeGroupId] || !groups[activeGroupId].points.length) {
+    section.style.display = "none";
+    return;
+  }
+  section.style.display = "block";
+  const g = groups[activeGroupId];
+  list.innerHTML = "";
+  g.points.forEach((p, idx) => {
+    const row = document.createElement("div");
+    row.className = "failed-row";
+    row.title = "Click to zoom";
+    const safe = p.address.replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    row.innerHTML =
+      '<div class="addr-text" style="flex:1; font-size:0.78rem; padding:6px 8px; background:#f7f8fa; border:1px solid #d1d5db; border-radius:6px; cursor:pointer; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + safe + '</div>' +
+      '<button class="secondary" title="Edit">✎</button>' +
+      '<button class="secondary" title="Remove">×</button>';
+    const txt = row.querySelector(".addr-text");
+    const btns = row.querySelectorAll("button");
+    txt.onclick = () => {
+      map.setView([p.lat, p.lon], 16);
+      if (p.marker) p.marker.openPopup();
+    };
+    btns[0].onclick = () => editPoint(g.id, idx);
+    btns[1].onclick = () => removePoint(g.id, idx);
+    list.appendChild(row);
+  });
+}
+
+function refreshHeatLayer(id) {
+  const g = groups[id];
+  if (g.heatLayer) { map.removeLayer(g.heatLayer); g.heatLayer = null; }
+  if (document.getElementById("heatToggle").checked && g.points.length) {
+    g.heatLayer = L.heatLayer(g.points.map(p => [p.lat, p.lon, 0.7]), { radius: 35, blur: 25, maxZoom: 13 });
+    if (g.visible) g.heatLayer.addTo(map);
+  }
+}
+
+// ---------- Geocoding ----------
+function normalizeAddress(addr) {
+  let s = String(addr);
+  // Common Michigan city/township typos
+  s = s.replace(/\bEASTPOINT\b/gi, "Eastpointe");
+  s = s.replace(/\bSHELBY\s+TWO\b/gi, "Shelby Township");      // typo: TWO -> Twp
+  s = s.replace(/\bCLINTON\s+TOWN\b(?!ship)/gi, "Clinton Township");
+  // Township abbreviations
+  s = s.replace(/\bTWP\b\.?/gi, "Township");
+  s = s.replace(/\bTWN\b\.?/gi, "Township");
+  // Common townships often listed without the word "Township"
+  // (only at end of city slot — not aggressive enough to break valid city names)
+  // Street-type abbreviations
+  s = s.replace(/\bLK\b\.?/gi, "Lake")
+       .replace(/\bRD\b\.?/gi, "Road")
+       .replace(/\bST\b\.?/gi, "Street")
+       .replace(/\bAVE\b\.?/gi, "Avenue")
+       .replace(/\bDR\b\.?/gi, "Drive")
+       .replace(/\bCT\b\.?/gi, "Court")
+       .replace(/\bLN\b\.?/gi, "Lane")
+       .replace(/\bCIR\b\.?/gi, "Circle")
+       .replace(/\bBLVD\b\.?/gi, "Boulevard")
+       .replace(/\bPKWY\b\.?/gi, "Parkway")
+       .replace(/\bHWY\b\.?/gi, "Highway")
+       .replace(/\s+/g, " ")
+       .trim();
+  return s;
+}
+
+// Pull "@ lat, lon" or "@lat,lon" suffix if present. Returns {address, lat, lon} or null.
+function parseInlineCoords(line) {
+  const m = String(line).match(/^(.*?)\s*@\s*(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (!m) return null;
+  const lat = parseFloat(m[2]), lon = parseFloat(m[3]);
+  if (isNaN(lat) || isNaN(lon)) return null;
+  return { address: m[1].trim(), lat: lat, lon: lon };
+}
+
+// Look up a known address in our hard-coded table (case/punctuation insensitive)
+function lookupKnown(addr) {
+  const key = String(addr).toUpperCase().replace(/\./g, "").replace(/\s+/g, " ").trim();
+  // Try exact match
+  if (KNOWN_COORDS[key]) return KNOWN_COORDS[key];
+  // Try substring match — handles trailing ZIP, extra punctuation, etc.
+  for (const k in KNOWN_COORDS) {
+    if (key.includes(k) || k.includes(key)) return KNOWN_COORDS[k];
+  }
+  return null;
+}
+
+function parseAddress(addr) {
+  const raw = normalizeAddress(addr);
+  const parts = raw.split(",").map(s => s.trim()).filter(Boolean);
+  let street = "", city = "", state = "", postcode = "";
+  if (parts.length >= 3) {
+    street = parts[0];
+    city = parts[1];
+    const tail = parts.slice(2).join(" ").trim();
+    const zipMatch = tail.match(/\b(\d{5})(-\d{4})?\b/);
+    if (zipMatch) postcode = zipMatch[1];
+    state = tail.replace(/\b\d{5}(-\d{4})?\b/, "").trim();
+  } else if (parts.length === 2) {
+    street = parts[0]; city = parts[1];
+  } else {
+    street = raw;
+  }
+  return { raw: raw, street: street, city: city, state: state || DEFAULT_STATE, country: DEFAULT_COUNTRY, postcode: postcode };
+}
+
+async function censusGeocode(addressLine) {
+  const url = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress" +
+    "?address=" + encodeURIComponent(addressLine) + "&benchmark=Public_AR_Current&format=json";
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const m = data && data.result && data.result.addressMatches && data.result.addressMatches[0];
+    if (m && m.coordinates) {
+      return { lat: parseFloat(m.coordinates.y), lon: parseFloat(m.coordinates.x), display: m.matchedAddress };
+    }
+  } catch (e) { console.warn("census err", e); }
+  return null;
+}
+
+async function nominatimQuery(params) {
+  const qs = Object.entries(params)
+    .filter(p => p[1] != null && p[1] !== "")
+    .map(p => p[0] + "=" + encodeURIComponent(p[1])).join("&");
+  const url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&addressdetails=1&" + qs;
+  const res = await fetch(url, { headers: { "Accept-Language": "en" } });
+  return res.json();
+}
+
+function inSanityBox(lat, lon) {
+  return lat >= 41.5 && lat <= 48.6 && lon >= -90.6 && lon <= -81.9;
+}
+
+let geocodeQueue = Promise.resolve();
+function geocode(address) {
+  if (geocodeCache[address]) return Promise.resolve(geocodeCache[address]);
+  const task = geocodeQueue.then(async () => {
+
+    // 0) Check hard-coded known coords first (your HQ etc.)
+    const known = lookupKnown(address);
+    if (known) {
+      const out = { lat: known.lat, lon: known.lon, display: address + " (known location)" };
+      geocodeCache[address] = out;
+      return out;
+    }
+
+    const parsed = parseAddress(address);
+    const fullLine = [parsed.street, parsed.city, parsed.state, parsed.postcode].filter(Boolean).join(", ");
+    // Build a list of variants to try — each fall-back is more permissive
+    const variants = [fullLine];
+    if (parsed.postcode) variants.push([parsed.street, parsed.city, parsed.state].filter(Boolean).join(", "));
+    if (parsed.city.toLowerCase().endsWith("township")) {
+      // Try "Charter Township" form (Michigan often uses this)
+      variants.push([parsed.street, parsed.city.replace(/township$/i, "Charter Township"), parsed.state, parsed.postcode].filter(Boolean).join(", "));
+    }
+    // Try without unit/suite info if street has it
+    const streetNoUnit = parsed.street.replace(/\s+(suite|ste|apt|unit|#)\s*\S+/i, "").trim();
+    if (streetNoUnit !== parsed.street) {
+      variants.push([streetNoUnit, parsed.city, parsed.state, parsed.postcode].filter(Boolean).join(", "));
+    }
+
+    // 1) US Census Geocoder — try each variant
+    for (const v of variants) {
+      const result = await censusGeocode(v);
+      if (result && inSanityBox(result.lat, result.lon)) {
+        geocodeCache[address] = result; return result;
+      }
+    }
+
+    // 2) Nominatim structured (rate-limited)
+    await new Promise(r => setTimeout(r, 1100));
+    try {
+      let data = await nominatimQuery({
+        street: parsed.street, city: parsed.city, state: parsed.state,
+        country: parsed.country, postalcode: parsed.postcode, countrycodes: "us"
+      });
+      // 3) Nominatim free-form bounded to Michigan
+      if (!data || !data[0]) {
+        await new Promise(r => setTimeout(r, 1100));
+        data = await nominatimQuery({ q: fullLine, countrycodes: "us", viewbox: MI_VIEWBOX, bounded: 1 });
+      }
+      // 4) Try without street number — at least get to the right street
+      if (!data || !data[0]) {
+        const streetNoNum = parsed.street.replace(/^\d+\s*/, "").trim();
+        if (streetNoNum && streetNoNum !== parsed.street) {
+          await new Promise(r => setTimeout(r, 1100));
+          data = await nominatimQuery({
+            street: streetNoNum, city: parsed.city, state: parsed.state,
+            country: parsed.country, countrycodes: "us"
+          });
+        }
+      }
+      if (data && data[0]) {
+        const lat = parseFloat(data[0].lat), lon = parseFloat(data[0].lon);
+        if (inSanityBox(lat, lon)) {
+          const out = { lat: lat, lon: lon, display: data[0].display_name };
+          geocodeCache[address] = out; return out;
+        }
+      }
+    } catch (e) { console.error("nominatim err", e); }
+
+    geocodeCache[address] = null;
+    return null;
+  });
+  geocodeQueue = task.catch(() => {});
+  return task;
+}
+
+// ---------- Failed list ----------
+function renderFailedList() {
+  const section = document.getElementById("failedSection");
+  const list = document.getElementById("failedList");
+  if (!failedAddresses.length) { section.style.display = "none"; return; }
+  section.style.display = "block";
+  list.innerHTML = "";
+  failedAddresses.forEach((f, idx) => {
+    const row = document.createElement("div");
+    row.className = "failed-row";
+    const safe = f.address.replace(/"/g, "&quot;");
+    row.innerHTML =
+      '<input type="text" value="' + safe + '" />' +
+      '<button class="secondary" title="Retry geocoding">↻</button>' +
+      '<button class="secondary" title="Set coordinates manually">📍</button>' +
+      '<button class="secondary" title="Remove">×</button>';
+    const input = row.querySelector("input");
+    const btns = row.querySelectorAll("button");
+    btns[0].onclick = async () => {
+      const newAddr = input.value.trim();
+      if (!newAddr) return;
+      delete geocodeCache[newAddr];
+      const groupId = f.groupId;
+      failedAddresses.splice(idx, 1);
+      renderFailedList();
+      await addAddressesToGroup(groupId, [newAddr]);
+    };
+    btns[1].onclick = async () => {
+      const addr = input.value.trim() || f.address;
+      const coords = prompt('Enter coordinates as "lat, lon" (e.g. 42.6296, -82.8855):');
+      if (!coords) return;
+      const m = coords.match(/(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)/);
+      if (!m) { alert("Couldn't parse — use the format: 42.6296, -82.8855"); return; }
+      const lat = parseFloat(m[1]), lon = parseFloat(m[2]);
+      const groupId = f.groupId;
+      failedAddresses.splice(idx, 1);
+      renderFailedList();
+      await addAddressesToGroup(groupId, [{ address: addr, lat: lat, lon: lon }]);
+    };
+    btns[2].onclick = () => { failedAddresses.splice(idx, 1); renderFailedList(); };
+    list.appendChild(row);
+  });
+}
+
+// ---------- Add addresses ----------
+// Accepts strings, "address @ lat, lon" strings, or {address, lat, lon} objects
+async function addAddressesToGroup(groupId, items) {
+  const g = groups[groupId];
+  let done = 0, success = 0, failed = 0;
+  setStatus("Processing 0 / " + items.length + "…", "", 0);
+  for (const item of items) {
+    let address = "", lat = null, lon = null;
+    if (item && typeof item === "object" && item.lat != null && item.lon != null) {
+      address = String(item.address).trim();
+      lat = item.lat; lon = item.lon;
+    } else {
+      const raw = String(item).trim();
+      if (!raw) { done++; continue; }
+      const inline = parseInlineCoords(raw);
+      if (inline) { address = inline.address || raw; lat = inline.lat; lon = inline.lon; }
+      else address = raw;
+    }
+    let result = null;
+    if (lat != null && lon != null) result = { lat: lat, lon: lon };
+    else result = await geocode(address);
+    done++;
+    if (result) {
+      g.points.push({ address: address, lat: result.lat, lon: result.lon });
+      success++;
+      for (let i = failedAddresses.length - 1; i >= 0; i--) {
+        if (failedAddresses[i].address === address) failedAddresses.splice(i, 1);
+      }
+    } else {
+      failed++;
+      if (!failedAddresses.some(f => f.address === address)) {
+        failedAddresses.push({ address: address, groupId: groupId });
+      }
+    }
+    setStatus("Processing " + done + " / " + items.length + " (" + success + " mapped)…", "", (done / items.length) * 100);
+    refreshGroupMarkers(groupId);
+    renderGroupList();
+    renderFailedList();
+  }
+  if (failed) {
+    setStatus("Done — " + success + " mapped, " + failed + ' could not be located. Use "Set coords" or edit address in panel below.', "error");
+  } else if (success) {
+    setStatus("Mapped " + success + " addresses ✓", "success");
+  }
+  setTimeout(() => setStatus(""), 8000);
+  fitToAll();
+}
+
+// ---------- Excel / CSV import ----------
+let workbookData = null;
+document.getElementById("fileInput").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data);
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+  if (!rows.length) { setStatus("Spreadsheet is empty", "error"); return; }
+  workbookData = rows;
+  const cols = Object.keys(rows[0]);
+  const buildSelect = (sel, placeholder) => {
+    sel.innerHTML = '<option value="">' + placeholder + '</option>' +
+      cols.map(c => '<option value="' + c + '">' + c + '</option>').join("");
+  };
+  const addrSel = document.getElementById("addrCol");
+  const citySel = document.getElementById("cityCol");
+  const stateSel = document.getElementById("stateCol");
+  buildSelect(addrSel, "Address column");
+  buildSelect(citySel, "City column (optional)");
+  buildSelect(stateSel, "State column (optional)");
+  cols.forEach(c => {
+    const lc = c.toLowerCase();
+    if (lc.includes("addr") || lc.includes("street") || lc.includes("line_1")) addrSel.value = c;
+    if (lc.includes("city") || lc.includes("municipal")) citySel.value = c;
+    if (lc.includes("state") || lc.includes("province")) stateSel.value = c;
+  });
+  document.getElementById("columnMap").style.display = "block";
+});
+
+document.getElementById("importBtn").addEventListener("click", async () => {
+  if (!workbookData || !activeGroupId) return;
+  const a = document.getElementById("addrCol").value;
+  const c = document.getElementById("cityCol").value;
+  const s = document.getElementById("stateCol").value;
+  if (!a) { alert("Pick an address column"); return; }
+  const list = workbookData.map(r => {
+    const parts = [r[a], r[c], r[s]].filter(x => x !== "" && x != null).map(x => String(x).trim());
+    return parts.join(", ");
+  }).filter(Boolean);
+  await addAddressesToGroup(activeGroupId, list);
+});
+
+// ---------- Manual entry ----------
+document.getElementById("addManualBtn").addEventListener("click", async () => {
+  const txt = document.getElementById("manualInput").value;
+  const list = txt.split("\n").map(s => s.trim()).filter(Boolean);
+  if (!list.length || !activeGroupId) return;
+  await addAddressesToGroup(activeGroupId, list);
+  document.getElementById("manualInput").value = "";
+});
+
+// ---------- Display toggles ----------
+document.getElementById("clusterToggle").addEventListener("change", (e) => {
+  Object.values(groups).forEach(g => {
+    map.removeLayer(g.layer);
+    g.layer = e.target.checked
+      ? L.markerClusterGroup({ showCoverageOnHover: false, spiderfyOnMaxZoom: true, maxClusterRadius: 40 })
+      : L.layerGroup();
+    g.cluster = e.target.checked;
+    if (g.visible) g.layer.addTo(map);
+    refreshGroupMarkers(g.id);
+  });
+});
+document.getElementById("heatToggle").addEventListener("change", () => {
+  Object.keys(groups).forEach(id => refreshHeatLayer(id));
+});
+document.getElementById("labelToggle").addEventListener("change", () => {
+  Object.keys(groups).forEach(id => refreshGroupMarkers(id));
+});
+
+// ---------- Fit / new group / export ----------
+function fitToAll() {
+  const bounds = L.latLngBounds([]);
+  Object.values(groups).forEach(g => g.points.forEach(p => bounds.extend([p.lat, p.lon])));
+  if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40] });
+}
+document.getElementById("fitBtn").addEventListener("click", fitToAll);
+
+document.getElementById("addGroupBtn").addEventListener("click", () => {
+  const name = prompt("Group name:", "Group " + (Object.keys(groups).length + 1));
+  if (!name) return;
+  const usedColors = Object.values(groups).map(g => g.color);
+  const color = COLORS.find(c => !usedColors.includes(c)) || COLORS[Object.keys(groups).length % COLORS.length];
+  const symbol = SYMBOLS[Object.keys(groups).length % SYMBOLS.length];
+  const id = createGroup(name, symbol, color);
+  setActiveGroup(id);
+});
+
+document.getElementById("exportBtn").addEventListener("click", () => {
+  const rows = [["Group", "Address", "Latitude", "Longitude"]];
+  Object.values(groups).forEach(g => g.points.forEach(p => rows.push([g.name, p.address, p.lat, p.lon])));
+  const csv = rows.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = "mapped_addresses.csv"; a.click();
+});
+
+// ---------- Boot ----------
+async function boot() {
+  initMap();
+  const customerId = createGroup("Customer Addresses", SYMBOLS[0], "#e11d48");
+  const refId = createGroup("Reference Locations", SYMBOLS[1], "#3b82f6");
+
+  // Load HQ + any other reference points (uses pinned coordinates, no geocoding)
+  if (PRELOADED_REFERENCES.length) {
+    setActiveGroup(refId);
+    await addAddressesToGroup(refId, PRELOADED_REFERENCES);
+  }
+  if (PRELOADED_CUSTOMERS.length) {
+    await addAddressesToGroup(customerId, PRELOADED_CUSTOMERS);
+  }
+  setActiveGroup(customerId);
+}
+boot();
+</script>
+</body>
+</html>

@@ -189,7 +189,8 @@
       <div class="toggle-row"><input type="checkbox" id="labelToggle" /><label for="labelToggle">Show address labels</label></div>
       <hr/>
       <button class="secondary" id="fitBtn" style="width:100%; margin-bottom:6px;">Zoom to Fit All</button>
-      <button class="secondary" id="exportBtn" style="width:100%;">Export Coordinates (CSV)</button>
+      <button class="secondary" id="exportBtn" style="width:100%; margin-bottom:6px;">Export Coordinates (CSV)</button>
+      <button class="secondary" id="resetSavedBtn" style="width:100%;">Clear Saved Pin Positions</button>
     </div>
   </aside>
 
@@ -214,27 +215,41 @@ const DEFAULT_STATE = "Michigan";
 const DEFAULT_COUNTRY = "USA";
 const MI_VIEWBOX = "-90.5,48.5,-82.0,41.6"; // lon_min, lat_max, lon_max, lat_min
 
+// ---- Persistent saved marker positions (drag once, stays forever) ----
+const STORAGE_KEY = "heatmap_saved_positions_v1";
+function loadSavedPositions() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}"); }
+  catch (e) { return {}; }
+}
+function saveSavedPositions() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(savedPositions)); }
+  catch (e) { console.warn("localStorage save failed", e); }
+}
+let savedPositions = loadSavedPositions();
+function rememberPosition(address, lat, lon) {
+  savedPositions[address] = { lat: lat, lon: lon };
+  saveSavedPositions();
+}
+function forgetPosition(address) {
+  delete savedPositions[address];
+  saveSavedPositions();
+}
+
 let map, baseLayer;
 const groups = {};
 let activeGroupId = null;
 let groupCounter = 0;
 const failedAddresses = [];
 
-// Pre-loaded HQ — known coordinates so it always plots even if geocoding fails
-// Format: { address, lat, lon }   (lat/lon optional — if missing, will be geocoded)
+// Pre-loaded HQ. Coordinates are an initial estimate — drag the pin once and
+// it'll save permanently to localStorage so you never have to do it again.
 const PRELOADED_REFERENCES = [
-  // Priority Waste HQ — coordinates pinned to the building footprint
   { address: "45000 River Ridge Drive, Clinton Township, MI 48038", lat: 42.6296, lon: -82.8855 }
 ];
 const PRELOADED_CUSTOMERS = [];
 
-// Hard-coded known coordinates — checked before any geocoder.
-// Useful for commercial addresses on private roads that Census/Nominatim miss.
-const KNOWN_COORDS = {
-  "45000 RIVER RIDGE DRIVE, CLINTON TOWNSHIP, MI": { lat: 42.6296, lon: -82.8855 },
-  "45000 RIVER RIDGE DR, CLINTON TOWNSHIP, MI":   { lat: 42.6296, lon: -82.8855 },
-  "39000 VAN BORN RD, WAYNE, MI":                  { lat: 42.2786, lon: -83.3520 }
-};
+// Hard-coded coords — kept empty so user-saved (localStorage) positions take precedence.
+const KNOWN_COORDS = {};
 
 // ---------- Map ----------
 function initMap() {
@@ -360,23 +375,42 @@ function refreshGroupMarkers(id) {
   g.layer.clearLayers();
   const icon = makeIcon(g.symbol, g.color);
   g.points.forEach((p, idx) => {
-    const m = L.marker([p.lat, p.lon], { icon: icon, draggable: true, autoPan: true });
+    // Approximate markers get a dashed border to flag them visually
+    const iconForPoint = p.approximate
+      ? L.divIcon({
+          className: "",
+          html: '<div class="custom-marker" style="background:' + g.color + '; border:2px dashed white; box-shadow: 0 0 0 2px ' + g.color + ', 0 2px 6px rgba(0,0,0,0.4);">' + g.symbol + '</div>',
+          iconSize: [28, 28], iconAnchor: [14, 14], popupAnchor: [0, -14]
+        })
+      : icon;
+    const m = L.marker([p.lat, p.lon], { icon: iconForPoint, draggable: true, autoPan: true });
     p.marker = m;
-    // Sync coordinates if the user drags the marker
     m.on("dragend", (ev) => {
       const ll = ev.target.getLatLng();
       p.lat = ll.lat; p.lon = ll.lng;
+      p.approximate = false;            // user-positioned = no longer approximate
+      rememberPosition(p.address, ll.lat, ll.lng);  // persist to localStorage
+      refreshGroupMarkers(g.id);        // refresh icon (drop dashed border)
     });
     const safeAddr = p.address.replace(/</g, "&lt;");
+    const approxBadge = p.approximate
+      ? '<div style="background:#fef3c7; color:#92400e; padding:3px 6px; border-radius:4px; font-size:11px; margin-top:4px;">⚠ Approximate location — drag pin to correct address</div>'
+      : "";
+    const savedBadge = (savedPositions[p.address] && !p.approximate)
+      ? '<div style="background:#d1fae5; color:#065f46; padding:3px 6px; border-radius:4px; font-size:11px; margin-top:4px;">✓ Custom position saved</div>'
+      : "";
     m.bindPopup(
-      '<div style="min-width:220px">' +
+      '<div style="min-width:240px">' +
         '<strong>' + g.name + '</strong><br>' + safeAddr +
+        approxBadge + savedBadge +
         '<div style="font-size:11px; color:#6b7280; margin-top:4px;">' +
           p.lat.toFixed(5) + ", " + p.lon.toFixed(5) + ' · drag pin to adjust' +
         '</div>' +
-        '<div style="margin-top:8px; display:flex; gap:6px;">' +
+        '<div style="margin-top:8px; display:flex; gap:6px; flex-wrap:wrap;">' +
           '<button class="popup-edit" data-gid="' + g.id + '" data-idx="' + idx + '" ' +
             'style="flex:1; padding:4px 8px; background:white; color:#1f3a5f; border:1px solid #1f3a5f; border-radius:4px; cursor:pointer; font-size:12px;">Edit</button>' +
+          '<button class="popup-coords" data-gid="' + g.id + '" data-idx="' + idx + '" ' +
+            'style="flex:1; padding:4px 8px; background:white; color:#1f3a5f; border:1px solid #1f3a5f; border-radius:4px; cursor:pointer; font-size:12px;">Set Coords</button>' +
           '<button class="popup-remove" data-gid="' + g.id + '" data-idx="' + idx + '" ' +
             'style="flex:1; padding:4px 8px; background:#fee2e2; color:#991b1b; border:1px solid #991b1b; border-radius:4px; cursor:pointer; font-size:12px;">Remove</button>' +
         '</div>' +
@@ -401,8 +435,27 @@ document.addEventListener("click", async (e) => {
     const gid = e.target.dataset.gid;
     const idx = parseInt(e.target.dataset.idx, 10);
     removePoint(gid, idx);
+  } else if (e.target.classList.contains("popup-coords")) {
+    const gid = e.target.dataset.gid;
+    const idx = parseInt(e.target.dataset.idx, 10);
+    setPointCoords(gid, idx);
   }
 });
+
+function setPointCoords(groupId, idx) {
+  const g = groups[groupId]; if (!g) return;
+  const p = g.points[idx]; if (!p) return;
+  const current = p.lat.toFixed(5) + ", " + p.lon.toFixed(5);
+  const coords = prompt('Enter exact coordinates as "lat, lon":\n\nTip: in Google Maps, right-click any spot and the coordinates appear at the top of the menu. Click them to copy.', current);
+  if (!coords) return;
+  const m = coords.match(/(-?\d+(?:\.\d+)?)\s*[,\s]\s*(-?\d+(?:\.\d+)?)/);
+  if (!m) { alert("Couldn't parse — use format: 42.6296, -82.8855"); return; }
+  const lat = parseFloat(m[1]), lon = parseFloat(m[2]);
+  p.lat = lat; p.lon = lon; p.approximate = false;
+  rememberPosition(p.address, lat, lon);
+  map.closePopup();
+  refreshGroupMarkers(groupId);
+}
 
 async function editPoint(groupId, idx) {
   const g = groups[groupId]; if (!g) return;
@@ -581,7 +634,15 @@ function geocode(address) {
   if (geocodeCache[address]) return Promise.resolve(geocodeCache[address]);
   const task = geocodeQueue.then(async () => {
 
-    // 0) Check hard-coded known coords first (your HQ etc.)
+    // 0a) Saved position from previous user drag — highest priority
+    if (savedPositions[address]) {
+      const sp = savedPositions[address];
+      const out = { lat: sp.lat, lon: sp.lon, display: address + " (saved position)" };
+      geocodeCache[address] = out;
+      return out;
+    }
+
+    // 0b) Hard-coded known coords (your HQ etc.)
     const known = lookupKnown(address);
     if (known) {
       const out = { lat: known.lat, lon: known.lon, display: address + " (known location)" };
@@ -643,6 +704,24 @@ function geocode(address) {
         }
       }
     } catch (e) { console.error("nominatim err", e); }
+
+    // 5) City-centroid fallback — always plot SOMETHING so user can drag-adjust
+    if (parsed.city) {
+      try {
+        await new Promise(r => setTimeout(r, 1100));
+        const cityData = await nominatimQuery({
+          city: parsed.city, state: parsed.state, country: parsed.country, countrycodes: "us"
+        });
+        if (cityData && cityData[0]) {
+          const lat = parseFloat(cityData[0].lat), lon = parseFloat(cityData[0].lon);
+          if (inSanityBox(lat, lon)) {
+            const out = { lat: lat, lon: lon, display: parsed.city + " (approximate — city centroid; drag pin to correct)", approximate: true };
+            geocodeCache[address] = out;
+            return out;
+          }
+        }
+      } catch (e) { console.warn("city centroid err", e); }
+    }
 
     geocodeCache[address] = null;
     return null;
@@ -714,11 +793,21 @@ async function addAddressesToGroup(groupId, items) {
       else address = raw;
     }
     let result = null;
-    if (lat != null && lon != null) result = { lat: lat, lon: lon };
-    else result = await geocode(address);
+    let isApproximate = false;
+    // Saved positions (from previous drag) always win
+    if (savedPositions[address]) {
+      result = { lat: savedPositions[address].lat, lon: savedPositions[address].lon };
+    } else if (lat != null && lon != null) {
+      result = { lat: lat, lon: lon };
+    } else {
+      result = await geocode(address);
+    }
     done++;
     if (result) {
-      g.points.push({ address: address, lat: result.lat, lon: result.lon });
+      isApproximate = !!result.approximate;
+      g.points.push({ address: address, lat: result.lat, lon: result.lon, approximate: isApproximate });
+      // If user supplied explicit coords, remember them
+      if (lat != null && lon != null) rememberPosition(address, lat, lon);
       success++;
       for (let i = failedAddresses.length - 1; i >= 0; i--) {
         if (failedAddresses[i].address === address) failedAddresses.splice(i, 1);
@@ -831,6 +920,15 @@ document.getElementById("addGroupBtn").addEventListener("click", () => {
   const symbol = SYMBOLS[Object.keys(groups).length % SYMBOLS.length];
   const id = createGroup(name, symbol, color);
   setActiveGroup(id);
+});
+
+document.getElementById("resetSavedBtn").addEventListener("click", () => {
+  const count = Object.keys(savedPositions).length;
+  if (!count) { alert("No saved pin positions to clear."); return; }
+  if (!confirm("Clear " + count + " saved pin position(s)? Pins will revert to geocoder positions on next reload.")) return;
+  savedPositions = {};
+  saveSavedPositions();
+  alert("Cleared. Reload the page to re-geocode all pins.");
 });
 
 document.getElementById("exportBtn").addEventListener("click", () => {
